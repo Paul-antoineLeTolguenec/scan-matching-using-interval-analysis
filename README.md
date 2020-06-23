@@ -6,7 +6,7 @@ The SLAM problem is one of the major problems of underwater robotics.
 Indeed, underwater robots must imperatively locate themselves via the IMU and the various sonars.
 When the robot moves in a known area, it can identify remarkable positions already known to refine its position (landmarks). 
 See an example [here](http://simon-rohou.fr/research/tubex-lib/doc/tutorial/03-static-rangebearing/index.html).
-but when the environment is totally unknown, you have to consider the whole environment that you can perceive through sonar.
+But when the environment is totally unknown, you have to consider the whole environment that you can perceive through sonar.
 To simplify the exercise we will do the study in 2D.
 
 ## Objective
@@ -38,3 +38,8 @@ What was the robot's evolution q between T1 and T2 so that the robot sees the en
 
 
 
+## Built With
+
+* [ibex-lib](https://github.com/ibex-team/ibex-lib) - Interval Analysis library
+* [tubex-lib](https://github.com/SimonRohou/tubex-lib) - Tubex is a C++ library providing tools for computations over sets of trajectories
+* [VIBes](https://github.com/ENSTABretagneRobotics/VIBES) - Visualizer for Intervals and Boxes 
