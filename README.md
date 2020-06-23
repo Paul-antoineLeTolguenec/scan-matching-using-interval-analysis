@@ -20,6 +20,21 @@ On the picture below we can see in red the box including the position at T1 and 
     <img src="https://github.com/Paul-antoineLeTolguenec/scan-matching-using-interval-analysis/blob/master/docs/images/objective.png" >
 </p>
 
+## Mathematical approach
+
+At each moment the robot carries out a measuring set thanks to the side sonars.
+The measurements allow to locate certain points of the cave in the robot's reference frame.
+
+The challenge is to carry out a "scan matching" between a set of data taken at time T1 and a set of data taken at time T2. 
+This "scan matching" will allow us to know the q evolution of the robot.
+The question we want to answer is:
+
+What was the robot's evolution q between T1 and T2 so that the robot sees the environment that way at T1 and this way at T2 ?
+
+<p align="center">
+    <img src="https://github.com/Paul-antoineLeTolguenec/scan-matching-using-interval-analysis/blob/master/docs/images/measuring.png" >
+</p>
+
 
 
 
