@@ -16,6 +16,10 @@ By integration, the position at T2 is known with a larger error than at T1.
 The objective of this exercise is to refine our knowledge of q and thus of the robot position at T2.
 On the picture below we can see in red the box including the position at T1 and in green the box including the position at T2.
 
+<p align="center">
+    <img src="https://github.com/Paul-antoineLeTolguenec/scan-matching-using-interval-analysis/blob/master/docs/images/objective.png" >
+</p>
+
 
 
 
