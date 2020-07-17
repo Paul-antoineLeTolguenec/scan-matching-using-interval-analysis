@@ -3,21 +3,77 @@
 #include <tubex-rob.h>
 #include <tubex-3rd.h>
 #include <iostream>
-#include "CtcAssociation.h"
+#include "OpHull.h"
 #include <random>
 
 using namespace std;
 using namespace ibex;
 using namespace tubex;
 
+void SIVIA(IntervalVector q, IntervalVector x1, vector<IntervalVector> v_obs_t2, vector<vector<IntervalVector>> assot2,vector<IntervalVector>asso_hull, int dim, IntervalVector*qopt=new IntervalVector, float *Min=new float,float *Minq=new float, int k=0){
+  pyibex::CtcPolar ctc_polar;
+  //Let's bring t2 measures into t1 frame
+  vector<IntervalVector> Bt2(v_obs_t2.size());
+  Interval theta2;
+  int i=0;
+  for (auto& obs:Bt2)
+    { obs=IntervalVector(2);
+      theta2=Interval();
+      theta2=v_obs_t2[i][1]+q[2]+x1[2];
+      ctc_polar.contract(obs[0], obs[1], v_obs_t2[i][0], theta2);
+      obs[0]=obs[0]+q[0];
+      obs[1]=obs[1]+q[1];
+      i++;
+      }
+  //Let's calculate the sum we want to minimize
+  float Sum=0;
+  for (int i = 0; i < Bt2.size(); i++)
+  {
+    /* Sum+=pow(distance(Bt2[i],asso_hull[i]),4); */
+    for (int j = 0; j < assot2[i].size(); j++)
+    { 
+      Sum+=pow(distance(Bt2[i],assot2[i][j]),2);
+    }
+  }
+  //Update Min value
+  if (Sum<=*Min or k==0)
+  { 
+   /*  cout<<k<<endl; */
+    *Min=Sum;
+    *qopt=q;
+    /* cout<<Sum<<"     "<<*qopt<<endl; */
+  }
+  
+  // cut the boxes and do it again
+  if (k<dim)
+   {  
+      IntervalVector q1=q;
+      IntervalVector q2=q;
+      q1[k%3]=Interval(q[k%3].lb(),q[k%3].mid());
+      q2[k%3]=Interval(q[k%3].mid(),q[k%3].ub());
+      k++;
+      SIVIA(q2,x1,v_obs_t2,assot2,asso_hull,dim,qopt,Min,Minq,k);
+      SIVIA(q1,x1,v_obs_t2,assot2,asso_hull,dim,qopt,Min,Minq,k);
+     
+   }
+   
+  }
+
+
+
+
 
 int main(int argc, char** argv) {
+  vector<IntervalVector>*set=new vector<IntervalVector>;
+  
+  
   /* ================================================= CREATING DATA ============================================================ */
   IntervalVector map_area(2, Interval(-20.,20.));
 
   // Truth (unknown pose)
   Vector truth1(3,0.);
-  truth1[2] = M_PI/6.; // heading
+  truth1[0]=-10;
+  truth1[2] = 0; // heading
 
 /* =========== CREATING LANDMARKS =========== */
     int nb_marks=100;
@@ -30,14 +86,14 @@ int main(int argc, char** argv) {
       //upwall
       mark=IntervalVector(2);
       mark[0]=Interval(-20+i/2.5);
-      mark[1]=Interval(2*sin(-M_PI+(i/nb_marks)*2*M_PI)+15);
+      mark[1]=Interval(2*sin(-M_PI+(i/nb_marks)*2*M_PI)+15+nb_marks/2*sin(i)/nb_marks);
       i+=2;} 
     i=0;
     for (auto& mark : bwall1){ //landmark from -15 to 15
       //bwall
       mark=IntervalVector(2);
       mark[0]=Interval(-20+i/2.5);
-      mark[1]=Interval(2*sin(-M_PI+(i/nb_marks)*2*M_PI)-15);
+      mark[1]=Interval(2*sin(-M_PI+(i/nb_marks)*2*M_PI)-15+nb_marks/2*sin(i)/nb_marks);
       i+=2;} 
     //let's create a vector containing all the landmarks
     vector<IntervalVector> v_b1 =upwall1;
@@ -51,14 +107,14 @@ int main(int argc, char** argv) {
       //upwall
       mark=IntervalVector(2);
       mark[0]=Interval(-20+i/2.5);
-      mark[1]=Interval(2*sin(-M_PI+(i/nb_marks)*2*M_PI)+15);
+      mark[1]=Interval(2*sin(-M_PI+(i/nb_marks)*2*M_PI)+15+nb_marks/2*sin(i)/nb_marks);
       i+=2;} 
     i=1;
     for (auto& mark : bwall2){ //landmark from -15 to 15
       //bwall
       mark=IntervalVector(2);
       mark[0]=Interval(-20+i/2.5);
-      mark[1]=Interval(2*sin(-M_PI+(i/nb_marks)*2*M_PI)-15);
+      mark[1]=Interval(2*sin(-M_PI+(i/nb_marks)*2*M_PI)-15+nb_marks/2*sin(i)/nb_marks);
       i+=2;} 
     //let's create a vector containing all the landmarks
     vector<IntervalVector> v_b2 =upwall2;
@@ -74,26 +130,32 @@ int main(int argc, char** argv) {
      */
     //Keep only some random observations:
     vector<IntervalVector> obs_t1(nb_observations);
+    int index;
     for (auto& obs : obs_t1)
     {std::random_device seed ;
       // generator 
       std::mt19937 engine( seed( ) ) ;
       // number distribution
       std::uniform_int_distribution<int> choose( 0 , v_b1.size( ) - 1 ) ;
-      obs= v_b1[ choose( engine ) ] ;}
+      index=choose( engine ) ;
+      obs= v_b1[ index ];
+      v_b1.erase(v_b1.begin()+index);
+      }
     vector<IntervalVector> v_obs_t1 = DataLoader::generate_observations(truth1, obs_t1); //, true, visi_range, visi_angle); if you to keep the sonar range
     //box inflating due to sonar loss
     for(auto& obs : v_obs_t1) {
       obs[0].inflate(0.2); // range
       obs[1].inflate(0.025); // bearing
     }
+
+
     /* =========== OBSERVATION INSTANT T2 =========== */
     /* first updating of the pose */
     // Truth (unknown pose)
     Vector truth2(3,0.);
     truth2[0] = 6.;
     truth2[1] = -1.; // y
-    truth2[2] = 0.; // heading
+    truth2[2] = -M_PI/6.; // heading
 
     //True displacement qtrue
     Vector qtrue(3,0.);
@@ -115,7 +177,9 @@ int main(int argc, char** argv) {
       std::mt19937 engine( seed( ) ) ;
       // number distribution
       std::uniform_int_distribution<int> choose( 0 , v_b2.size( ) - 1 ) ;
-      obs= v_b2[ choose( engine ) ] ;
+      index=choose( engine ) ;
+      obs= v_b2[ index ];
+      v_b2.erase(v_b2.begin()+index);
     }
   //the following line is used to generate the observation given the pose of the robot 
   //you can use the extension of the function in order to limit the bearing range as it is in the reality.
@@ -127,9 +191,9 @@ int main(int argc, char** argv) {
     }
 /* The IMU measurement gives us the evolution q of the robot between t1 and t2 */
   IntervalVector q(3);
-  q[0]=Interval(-1,1)+qtrue[0] ;
-  q[1]=Interval(-1,1)+qtrue[1] ; 
-  q[2]=Interval(-M_PI/8,M_PI/8)+qtrue[2] ; 
+  q[0]=Interval(-0.5,0.5)+qtrue[0] ;
+  q[1]=Interval(-0.5,0.5)+qtrue[1] ; 
+  q[2]=Interval(-M_PI/16,M_PI/16)+qtrue[2] ; 
 
 
 
@@ -153,8 +217,34 @@ int main(int argc, char** argv) {
     x1[2] = Interval(truth1[2]);
 
     /* ------------TO DO--------------- */
-    
-    
+    pyibex::CtcPolar ctc_polar;
+    //first let's create the vector with the box containing the landmark at t1
+    IntervalVector b_t1(2);
+    Interval theta=Interval();
+    vector<IntervalVector> b_obs_t1g(v_obs_t1);
+    vector<IntervalVector> b_obs_t1(v_obs_t1);
+
+    i=0;
+    for (auto& obs : b_obs_t1g)
+      { obs=IntervalVector(2);
+        theta=Interval();
+        theta=v_obs_t1[i][1]+x1[2];
+        ctc_polar.contract(obs[0], obs[1], v_obs_t1[i][0], theta);
+        obs[0]=obs[0]+x1[0];
+        obs[1]=obs[1]+x1[1];
+        i++;
+        }
+
+    i=0;
+    for (auto& obs : b_obs_t1)
+      { obs=IntervalVector(2);
+        theta=Interval();
+        theta=v_obs_t1[i][1]+x1[2];
+        ctc_polar.contract(obs[0], obs[1], v_obs_t1[i][0], theta);
+        obs[0]=obs[0];
+        obs[1]=obs[1];
+        i++;
+        }
 
 
 
@@ -179,20 +269,144 @@ int main(int argc, char** argv) {
   x2[2]=x1[2]+q[2];
 
 /*========================= TO DO ===============================================*/
+// the first step envisaged is to bring the Rnew measurements back into Rref
+//let's take the observations of v_obs_t2 and bring it back to general frame
+  IntervalVector b_t2(2);
+  Interval theta2=Interval();
+  vector<IntervalVector> b_obs_t2g(v_obs_t2);
+  vector<IntervalVector> b_obs_t2(v_obs_t2);
+  vector<IntervalVector> v_obs_t2_in_t1(v_obs_t2);
+  i=0;
+  for (auto& obs : b_obs_t2g)
+    { obs=IntervalVector(2);
+      theta2=Interval();
+      theta2=v_obs_t2[i][1]+x2[2];
+      ctc_polar.contract(obs[0], obs[1], v_obs_t2[i][0], theta2);
+      obs[0]=obs[0]+x2[0];
+      obs[1]=obs[1]+x2[1];
+      i++;
+      }
+  i=0;
+  for (auto& obs : b_obs_t2)
+    { obs=IntervalVector(2);
+      theta2=Interval();
+      theta2=v_obs_t2[i][1]+q[2]+x1[2];
+      ctc_polar.contract(obs[0], obs[1], v_obs_t2[i][0], theta2);
+      obs[0]=obs[0]+q[0];
+      obs[1]=obs[1]+q[1];
+      i++;
+      }
 
+  i=0;
+  for (auto& obs : v_obs_t2_in_t1)
+    { obs=IntervalVector(2);
+      theta2=Interval();
+      theta2=v_obs_t2[i][1]+q[2]+x1[2];
+      ctc_polar.contract(obs[0], obs[1], v_obs_t2[i][0], theta2);
+      obs[0]=obs[0]+q[0];
+      obs[1]=obs[1]+q[1];
+      i++;
+      }  
 
+  /* Now that they are in the same frame, let's link one box to the others. */
+  /* so everybody is in the robot frame at t1 */
+  OpHull hull;
+  vector<vector<IntervalVector>> asso_t1at2(b_obs_t2.size());
+  vector<IntervalVector> asso_hull(b_obs_t2.size());
+  for (size_t i = 0; i < b_obs_t2.size(); i++){
+    for (size_t j = 0; j < b_obs_t1.size(); j++){
+      if (b_obs_t2[i].intersects(b_obs_t1[j]))
+      {
+        asso_t1at2[i].push_back(b_obs_t1[j]);
+      }
+      
+    }  
+    asso_hull[i]=hull.eval( asso_t1at2[i]);
+  }
+  
 
+/* ======================================================================+SIVIA+=============================================================== */
+IntervalVector*qopt=new IntervalVector;
+SIVIA(q, x1, v_obs_t2, asso_t1at2,asso_hull, 12,qopt);
+cout<<*qopt<<endl;
+cout<<qtrue<<endl;
 
+vector<IntervalVector> b_q_opt_t2(v_obs_t2);
+i=0;
+IntervalVector qcoco ;
+qcoco=*qopt;
 
+for (auto& obs : b_q_opt_t2)
+  { obs=IntervalVector(2);
+    theta2=Interval();
+    theta2=v_obs_t2[i][1]+qcoco[2]+x1[2];
+    ctc_polar.contract(obs[0], obs[1], v_obs_t2[i][0], theta2);
+    obs[0]=obs[0]+qcoco[0];
+    obs[1]=obs[1]+qcoco[1];
+    i++;
+    }
 
+/* ========================================================================+CONTRACTION METHODE+========================================================== */
+/* let's make the hypothesis that the sonars tend to take the shortest distance. */
+/* let's create a vector that contains all the measurments from t2 that are included into their hull box associated */
+vector<IntervalVector> box_included_into_hull(b_obs_t2.size());
+for (int i = 0; i < b_obs_t2.size(); i++)
+{ 
+ /*  if (b_obs_t2[i][0].is_subset(asso_hull[i][0]))
+  { */
+    box_included_into_hull[i]=b_obs_t2[i];
+    box_included_into_hull[i][1]=asso_hull[i][1];
+    /* if (asso_hull[i][1].lb()>x2[1].ub())
+    {box_included_into_hull[i][1]=Interval(asso_hull[i][1].lb(),b_obs_t2[i][1].ub());
+    }
+    else
+    {
+      box_included_into_hull[i][1]=Interval(b_obs_t2[i][1].lb(),asso_hull[i][1].ub());
+    } */
+  /* }
+  else
+  {
+    box_included_into_hull[i]=IntervalVector(2);
+  } */
+  
+}
+/* let's create our contractor network */
+ContractorNetwork cn;
+ibex::CtcFwdBwd ctc_add(*new ibex::Function( "a", "b","c", "a+b-c"));
+vector<IntervalVector> test(b_obs_t2.size());
+IntervalVector qvar= q;
+int counter=0;
+for (int i = 0; i < b_obs_t2.size(); i++)
+{   
+  if (box_included_into_hull[i][1].ub()<1000000 )
+  { counter++;
 
-
-
+    Interval& thetavar = cn.create_dom(Interval());
+    Interval& theta2 = cn.create_dom(v_obs_t2[i][1]+x1[2]);
+    Interval& rho = cn.create_dom( v_obs_t2[i][0]);
+    IntervalVector& box = cn.create_dom(IntervalVector(2));
+    IntervalVector& boxf = cn.create_dom(IntervalVector(2));
+   
+    cn.add(ctc_add,{theta2,qvar[2],thetavar});
+    cn.add(ctc_polar,{box[0], box[1],rho, thetavar});
+    cn.add(ctc_add,{box[1],qvar[1],box_included_into_hull[i][1]});
+    /* cn.add(ctc_add,{box[1],qvar[1],boxf[1]});
+    cn.add(ctc_add,{box[0],qvar[0],boxf[0]}); */
+   
+    
+  }
+}
+cn.contract();
+cout<<q<<endl;
+cout<<qvar<<endl;
 
 
     /* =========== GRAPHICS =========== */
 
     vibes::beginDrawing();
+
+
+    // Map : into a general frame
     VIBesFigMap fig_map("Map");
     fig_map.set_properties(10, 10, 600, 600);
     for(const auto& iv : v_b1){
@@ -200,14 +414,20 @@ int main(int argc, char** argv) {
     for(const auto& iv : v_b2){
         fig_map.add_beacon(Beacon(iv), 0.2);}
     /* observation t1 */
-    fig_map.add_observations(v_obs_t1, truth1);
+    /* fig_map.add_observations(v_obs_t1, truth1); */
     for(int i = 0 ; i < obs_t1.size() ; i++){
         fig_map.add_beacon(obs_t1[i], 0.2, "##A50108[#A50108]");}
+    for(auto& obs : b_obs_t1g){
+           fig_map.draw_box(obs, "red");} 
+
     fig_map.draw_box(x1.subvector(0,1), "#2980b9[#A50108]"); // estimated position (2d box)
     fig_map.draw_vehicle(truth1, 1.);
     
     /* observation t2 */
-    fig_map.add_observations(v_obs_t2, truth2);
+    for(auto& obs : b_obs_t2g){
+        fig_map.draw_box(obs, "green");} 
+
+
     for(int i = 0 ; i < obs_t2.size() ; i++){
         fig_map.add_beacon(obs_t2[i], 0.2, "#00A53B[#00A53B]");}
     fig_map.draw_box(x2.subvector(0,1), "#2980b9[#00A53B]"); // estimated position (2d box)
@@ -215,6 +435,50 @@ int main(int argc, char** argv) {
 
     fig_map.axis_limits(map_area);
     fig_map.show();
+
+    //Map2 : each observation represented into its on frame.
+    VIBesFigMap fig_map2("Map2");
+    fig_map2.set_properties(10, 10, 600, 600);
+    //observation t1
+    
+    for(auto& obs : b_obs_t1){
+           fig_map2.draw_box(obs, "red");} 
+
+
+    //hull
+    for(auto& obs : asso_hull){
+           fig_map2.draw_box(obs, "red");} 
+
+    //observation t2
+    
+    for(auto& obs : b_obs_t2){
+           fig_map2.draw_box(obs, "green");} 
+
+    //Included
+    for(auto& obs : box_included_into_hull){
+           fig_map2.draw_box(obs, "black");} 
+
+    fig_map2.axis_limits(map_area);
+    fig_map2.show();
+
+  //Map3 
+    VIBesFigMap fig_map3("Map3");
+    fig_map3.set_properties(10, 10, 600, 600);
+    //observation t1
+    
+    for(auto& obs : b_obs_t1){
+           fig_map3.draw_box(obs, "red");} 
+
+    //observation t2
+    
+    for(auto& obs : b_q_opt_t2){
+           fig_map3.draw_box(obs, "green");} 
+
+    fig_map3.axis_limits(map_area);
+    fig_map3.show();
+
+
+  
     vibes::endDrawing();
   /* =========== ENDING =========== */
 

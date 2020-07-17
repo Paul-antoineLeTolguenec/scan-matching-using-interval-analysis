@@ -14,7 +14,7 @@ include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-Wno-deprecated" COMPILER_SUPPORTS_WNO_DEPRECATED)
 
 # Compilation
-add_executable(${PROJECT_NAME} src/main.cpp src/CtcAssociation.cpp)
+add_executable(${PROJECT_NAME} src/main.cpp src/OpHull.cpp)
 target_compile_options(${PROJECT_NAME} PUBLIC ${TUBEX_CFLAGS})
 target_include_directories(${PROJECT_NAME} PUBLIC ${TUBEX_INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} PUBLIC ${TUBEX_LDFLAGS})
