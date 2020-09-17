@@ -5,6 +5,7 @@
 #include <iostream>
 #include "OpHull.h"
 #include <random>
+#include "CtcAssociation.h"
 
 using namespace std;
 using namespace ibex;
@@ -45,7 +46,7 @@ void SIVIA(IntervalVector q, IntervalVector x1, vector<IntervalVector> v_obs_t2,
   }
   
   // cut the boxes and do it again
-  if (k<dim)
+  if (k<dim )
    {  
       IntervalVector q1=q;
       IntervalVector q2=q;
@@ -58,6 +59,214 @@ void SIVIA(IntervalVector q, IntervalVector x1, vector<IntervalVector> v_obs_t2,
    }
    
   }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void SIVIA_Contraction(IntervalVector q, IntervalVector x1,IntervalVector x2, vector<IntervalVector> v_obs_t2, vector<IntervalVector>b_obs_t1, int dim, IntervalVector*qopt=new IntervalVector, float *Min=new float,float *Minq=new float, int k=0){
+  pyibex::CtcPolar ctc_polar;
+  //Let's bring t2 measures into t1 frame
+  vector<IntervalVector> Bt2(v_obs_t2.size());
+  Interval theta2;
+  int i=0;
+  for (auto& obs:Bt2)
+    { obs=IntervalVector(2);
+      theta2=Interval();
+      theta2=v_obs_t2[i][1]+q[2]+x1[2];
+      ctc_polar.contract(obs[0], obs[1], v_obs_t2[i][0], theta2);
+      obs[0]=obs[0]+q[0];
+      obs[1]=obs[1]+q[1];
+      i++;
+      }
+
+  /* Now that they are in the same frame, let's link one box to the others. */
+  /* so everybody is in the robot frame at t1 */
+  OpHull hull;
+  vector<vector<IntervalVector>> asso_t1at2(Bt2.size());
+  vector<IntervalVector> asso_hull(Bt2.size());
+  for (size_t i = 0; i < Bt2.size(); i++){
+    for (size_t j = 0; j < b_obs_t1.size(); j++){
+      if (Bt2[i].intersects(b_obs_t1[j]))
+      {
+        asso_t1at2[i].push_back(b_obs_t1[j]);
+      }
+      
+    }  
+    asso_hull[i]=hull.eval( asso_t1at2[i]);
+  }
+
+  vector<IntervalVector> box_included_into_hull(Bt2.size());
+  for (int i = 0; i < Bt2.size(); i++)
+  { 
+      box_included_into_hull[i]=Bt2[i];
+      box_included_into_hull[i][1]=asso_hull[i][1];
+      if (asso_hull[i][1].lb()>x2[1].ub())
+      {box_included_into_hull[i][1]=Interval(asso_hull[i][1].lb(),Bt2[i][1].ub());
+      }
+      else
+      {
+        box_included_into_hull[i][1]=Interval(Bt2[i][1].lb(),asso_hull[i][1].ub());
+      }
+    
+  }
+  
+  //Let's make the contraction
+  cout<<"         "<<endl;
+  
+  cout<<q<<endl;
+ 
+  
+  ContractorNetwork cn;
+  ibex::CtcFwdBwd ctc_add(*new ibex::Function( "a", "b","c", "a+b-c"));
+  vector<IntervalVector> test(Bt2.size());
+  int counter=0;
+  for (int i = 0; i < Bt2.size(); i++)
+  {   
+    if (box_included_into_hull[i][1].ub()<1000000 )
+    { counter++;
+
+      Interval& thetavar = cn.create_dom(Interval());
+      Interval& theta2 = cn.create_dom(v_obs_t2[i][1]+x1[2]);
+      Interval& rho = cn.create_dom( v_obs_t2[i][0]);
+      IntervalVector& box = cn.create_dom(IntervalVector(2));
+      IntervalVector& boxf = cn.create_dom(IntervalVector(2));
+    
+      cn.add(ctc_add,{theta2,q[2],thetavar});
+      cn.add(ctc_polar,{box[0], box[1],rho, thetavar});
+      cn.add(ctc_add,{box[1],q[1],box_included_into_hull[i][1]});
+      
+    }
+  }
+  cn.contract();
+ 
+ cout<<q<<endl;
+  
+  
+  // cut the boxes and do it again
+  if (k<dim)
+   {  
+      /* IntervalVector q1=q;
+      IntervalVector q2=q;
+      q1[k%3]=Interval(q[k%3].lb(),q[k%3].mid());
+      q2[k%3]=Interval(q[k%3].mid(),q[k%3].ub());
+      k++; */
+      k++;
+      SIVIA_Contraction(q,x1,x2,v_obs_t2,b_obs_t1,dim,qopt,Min,Minq,k);
+      /* SIVIA_Contraction(q1,x1,x2,v_obs_t2,b_obs_t1,dim,qopt,Min,Minq,k); */
+     
+   }
+   
+  }
+
+
+
+
+
+
+void SIVIA_Polar(vector<IntervalVector> v_obs_t2,vector<IntervalVector> v_obs_t1,IntervalVector q,int dim,int k=0){
+  
+ContractorNetwork cn;
+ibex::CtcFwdBwd ctc_add(*new ibex::Function( "a", "b","c", "a+b-c"));
+ibex::CtcFwdBwd ctc_polX(*new ibex::Function( "xq","dnew", "w","dref","aref","xq+dnew*cos(w)-dref*cos(aref)"));
+ibex::CtcFwdBwd ctc_polY(*new ibex::Function( "yq","dnew", "w","dref","aref","yq+dnew*sin(w)-dref*sin(aref)"));
+ibex::CtcFwdBwd ctc_D(*new ibex::Function( "dref","xq","yq","dnew","w","dref-sqrt(((xq+dnew*cos(w))^2+(yq+dnew*sin(w))^2))"));
+ibex::CtcFwdBwd ctc_A(*new ibex::Function( "aref","xq","yq","dnew","w","atan2(yq+dnew*sin(w),xq+dnew*cos(w))-aref"));
+
+ibex::CtcFwdBwd ctc_TX(*new ibex::Function( "mxq","xq", "yq","tq","(xq*cos(tq)+yq*sin(tq))+mxq"));
+ibex::CtcFwdBwd ctc_TY(*new ibex::Function( "myq","xq", "yq","tq","(yq*cos(tq)-xq*sin(tq))+myq"));
+ibex::CtcFwdBwd ctc_TT(*new ibex::Function( "mtq","tq","tq+mtq"));
+
+CtcAssociation ctc_asso1(v_obs_t1);
+CtcAssociation ctc_asso2(v_obs_t2);
+
+pyibex::CtcPolar ctc_polar;
+
+IntervalVector& mq = cn.create_dom(IntervalVector(3));
+IntervalVector mq1=-q;
+mq1[0]=-(cos(q[2])*q[0]+sin(q[2])*q[1]);
+mq1[1]=-(cos(q[2])*q[1]-sin(q[2])*q[0]);
+mq=mq&mq1;
+cout<<q<<endl;
+for (int i = 0; i < v_obs_t2.size(); i++)
+{  
+  IntervalVector& p1 = cn.create_dom(IntervalVector(2));
+  Interval& w1 = cn.create_dom(Interval());
+  IntervalVector& c1 = cn.create_dom(IntervalVector(2));
+  IntervalVector& c2 = cn.create_dom(IntervalVector(2));
+  cn.add(ctc_add,{q[2],v_obs_t2[i][1],w1});
+  cn.add(ctc_polX,{q[0],v_obs_t2[i][0],w1,p1[0],p1[1]});
+  cn.add(ctc_polY,{q[1],v_obs_t2[i][0],w1,p1[0],p1[1]});
+  cn.add(ctc_D,{p1[0],q[0],q[1],v_obs_t2[i][0],w1});
+  cn.add(ctc_A,{p1[1],q[0],q[1],v_obs_t2[i][0],w1});
+  cn.add(ctc_asso1,{p1});
+  /* ctc_polar(cartesian way) */
+  cn.add(ctc_polar,{c1[0],c1[1],v_obs_t2[i][0],w1});
+  cn.add(ctc_polar,{c2[0],c2[1],p1[0],p1[1]});
+  cn.add(ctc_add,{q[0],c1[0],c2[0]});
+  cn.add(ctc_add,{q[1],c1[1],c2[1]});
+
+  /* IntervalVector& p2 = cn.create_dom(IntervalVector(2));
+  Interval& w2 = cn.create_dom(Interval());
+  cn.add(ctc_TX,{ mq[0],q[0], q[1],q[2]});
+  cn.add(ctc_TY,{ mq[1],q[0], q[1],q[2]});
+  cn.add(ctc_TT,{ mq[2],q[2]});
+
+  cn.add(ctc_add,{mq[2],v_obs_t1[i][1],w2});
+  cn.add(ctc_polX,{mq[0],v_obs_t1[i][0],w2,p2[0],p2[1]});
+  cn.add(ctc_polY,{mq[1],v_obs_t1[i][0],w2,p2[0],p2[1]});
+  cn.add(ctc_D,{p2[0],mq[0],mq[1],v_obs_t1[i][0],w2});
+  cn.add(ctc_A,{p2[1],mq[0],mq[1],v_obs_t1[i][0],w2});
+  cn.add(ctc_asso2,{p2}); */
+  
+}
+cn.contract();
+cout<<q<<endl;
+
+if (k<dim and q.is_empty()==false)
+   {  
+      IntervalVector q1=q;
+      IntervalVector q2=q;
+      q1[k%3]=Interval(q[k%3].lb(),q[k%3].mid());
+      q2[k%3]=Interval(q[k%3].mid(),q[k%3].ub());
+      k++;
+      SIVIA_Polar(v_obs_t2,v_obs_t1,q1,dim,k);
+      SIVIA_Polar(v_obs_t2,v_obs_t1,q2,dim,k);
+     
+   }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -123,7 +332,7 @@ int main(int argc, char** argv) {
 
 
 /* =========== OBSERVATION INSTANT T1 =========== */
-    int nb_observations=50;
+    int nb_observations=90;
     // Creating  landmarks observations at t1 for the two walls
    /*  Interval visi_range(0.,100.); // [0m,75m]
     Interval visi_angle=Interval(-M_PI/4.+M_PI/2,M_PI/4.+M_PI/2)|Interval(-M_PI/4.-M_PI/2,M_PI/4.-M_PI/2); // frontal sonar
@@ -163,7 +372,7 @@ int main(int argc, char** argv) {
     qtrue[1] =truth2[1]-truth1[1] ; 
     qtrue[2] =truth2[2]-truth1[2] ; 
     //number of measurement
-    nb_observations=50;
+    nb_observations=80;
     // Creating  landmarks observations at t1 for the two walls
    /*  Interval visi_range(0.,100.); // [0m,75m]
     Interval visi_angle=Interval(-M_PI/4.+M_PI/2,M_PI/4.+M_PI/2)|Interval(-M_PI/4.-M_PI/2,M_PI/4.-M_PI/2); // frontal sonar
@@ -193,7 +402,7 @@ int main(int argc, char** argv) {
   IntervalVector q(3);
   q[0]=Interval(-0.5,0.5)+qtrue[0] ;
   q[1]=Interval(-0.5,0.5)+qtrue[1] ; 
-  q[2]=Interval(-M_PI/16,M_PI/16)+qtrue[2] ; 
+  q[2]=Interval(-M_PI/32,M_PI/32)+qtrue[2] ; 
 
 
 
@@ -310,7 +519,7 @@ int main(int argc, char** argv) {
 
   /* Now that they are in the same frame, let's link one box to the others. */
   /* so everybody is in the robot frame at t1 */
-  OpHull hull;
+ /*  OpHull hull;
   vector<vector<IntervalVector>> asso_t1at2(b_obs_t2.size());
   vector<IntervalVector> asso_hull(b_obs_t2.size());
   for (size_t i = 0; i < b_obs_t2.size(); i++){
@@ -323,11 +532,11 @@ int main(int argc, char** argv) {
     }  
     asso_hull[i]=hull.eval( asso_t1at2[i]);
   }
-  
+   */
 
 /* ======================================================================+SIVIA+=============================================================== */
-IntervalVector*qopt=new IntervalVector;
-SIVIA(q, x1, v_obs_t2, asso_t1at2,asso_hull, 12,qopt);
+/* IntervalVector*qopt=new IntervalVector;
+SIVIA(q, x1, v_obs_t2, asso_t1at2,asso_hull, 3,qopt);
 cout<<*qopt<<endl;
 cout<<qtrue<<endl;
 
@@ -344,34 +553,27 @@ for (auto& obs : b_q_opt_t2)
     obs[0]=obs[0]+qcoco[0];
     obs[1]=obs[1]+qcoco[1];
     i++;
-    }
+    } */
 
 /* ========================================================================+CONTRACTION METHODE+========================================================== */
 /* let's make the hypothesis that the sonars tend to take the shortest distance. */
 /* let's create a vector that contains all the measurments from t2 that are included into their hull box associated */
-vector<IntervalVector> box_included_into_hull(b_obs_t2.size());
+/* vector<IntervalVector> box_included_into_hull(b_obs_t2.size());
 for (int i = 0; i < b_obs_t2.size(); i++)
 { 
- /*  if (b_obs_t2[i][0].is_subset(asso_hull[i][0]))
-  { */
     box_included_into_hull[i]=b_obs_t2[i];
     box_included_into_hull[i][1]=asso_hull[i][1];
-    /* if (asso_hull[i][1].lb()>x2[1].ub())
+    if (asso_hull[i][1].lb()>x2[1].ub())
     {box_included_into_hull[i][1]=Interval(asso_hull[i][1].lb(),b_obs_t2[i][1].ub());
     }
     else
     {
       box_included_into_hull[i][1]=Interval(b_obs_t2[i][1].lb(),asso_hull[i][1].ub());
-    } */
-  /* }
-  else
-  {
-    box_included_into_hull[i]=IntervalVector(2);
-  } */
+    }
   
-}
+} */
 /* let's create our contractor network */
-ContractorNetwork cn;
+/* ContractorNetwork cn;
 ibex::CtcFwdBwd ctc_add(*new ibex::Function( "a", "b","c", "a+b-c"));
 vector<IntervalVector> test(b_obs_t2.size());
 IntervalVector qvar= q;
@@ -389,19 +591,112 @@ for (int i = 0; i < b_obs_t2.size(); i++)
    
     cn.add(ctc_add,{theta2,qvar[2],thetavar});
     cn.add(ctc_polar,{box[0], box[1],rho, thetavar});
-    cn.add(ctc_add,{box[1],qvar[1],box_included_into_hull[i][1]});
-    /* cn.add(ctc_add,{box[1],qvar[1],boxf[1]});
-    cn.add(ctc_add,{box[0],qvar[0],boxf[0]}); */
-   
+    cn.add(ctc_add,{box[1],qvar[1],box_included_into_hull[i][1]});   
     
   }
 }
 cn.contract();
 cout<<q<<endl;
 cout<<qvar<<endl;
+cout<<"         "<<endl; */
+/* =====================================================================PAVING+CONTRACTION============================================================================== */
+/* cout<<"contraction"<<endl;
+IntervalVector*qo=new IntervalVector;
+SIVIA_Contraction(q, x1,x2, v_obs_t2, b_obs_t1, 10);
+ */
 
 
-    /* =========== GRAPHICS =========== */
+
+
+
+/* =======================================================================Polar contraction======================================================================= */
+
+/* First let's try to bring T2 mesure into T1 frame in polar  */
+ContractorNetwork cn;
+ibex::CtcFwdBwd ctc_add(*new ibex::Function( "a", "b","c", "a+b-c"));
+ibex::CtcFwdBwd ctc_polX(*new ibex::Function( "xq","dnew", "w","dref","aref","xq+dnew*cos(w)-dref*cos(aref)"));
+ibex::CtcFwdBwd ctc_polY(*new ibex::Function( "yq","dnew", "w","dref","aref","yq+dnew*sin(w)-dref*sin(aref)"));
+ibex::CtcFwdBwd ctc_D(*new ibex::Function( "dref","xq","yq","dnew","w","dref-sqrt(((xq+dnew*cos(w))^2+(yq+dnew*sin(w))^2))"));
+ibex::CtcFwdBwd ctc_D2(*new ibex::Function( "dnew","xq","yq","dref","aref","dnew-sqrt(((xq-dref*cos(aref))^2+(yq-dref*sin(aref))^2))"));
+
+ibex::CtcFwdBwd ctc_A(*new ibex::Function( "aref","xq","yq","dnew","w","atan2(yq+dnew*sin(w),xq+dnew*cos(w))-aref"));
+ibex::CtcFwdBwd ctc_A2(*new ibex::Function( "aref","xq","yq","dref","w","atan2(dref*sin(aref)-yq,dref*cos(aref)-xq)-w"));
+
+/* Contractor inverse evolution */
+ibex::CtcFwdBwd ctc_TX(*new ibex::Function( "mxq","xq", "yq","tq","(xq*cos(tq)+yq*sin(tq))+mxq"));
+ibex::CtcFwdBwd ctc_TY(*new ibex::Function( "myq","xq", "yq","tq","(yq*cos(tq)-xq*sin(tq))+myq"));
+ibex::CtcFwdBwd ctc_TT(*new ibex::Function( "mtq","tq","tq+mtq"));
+
+CtcAssociation ctc_asso1(v_obs_t1);
+CtcAssociation ctc_asso2(v_obs_t2);
+vector<IntervalVector> obs2_polar(v_obs_t2.size());
+vector<vector<IntervalVector>> asso(v_obs_t2.size());
+
+OpHull hull;
+IntervalVector& mq = cn.create_dom(IntervalVector(3));
+IntervalVector mq1=-q;
+mq1[0]=-(cos(q[2])*q[0]+sin(q[2])*q[1]);
+mq1[1]=-(cos(q[2])*q[1]-sin(q[2])*q[0]);
+mq=mq&mq1;
+
+cout<<q<<endl;
+/* cout<<mq<<endl; */
+
+
+for (int i = 0; i < obs2_polar.size(); i++)
+{  
+  IntervalVector& p1 = cn.create_dom(IntervalVector(2));
+  Interval& w1 = cn.create_dom(Interval());
+  IntervalVector& c1 = cn.create_dom(IntervalVector(2));
+  IntervalVector& c2 = cn.create_dom(IntervalVector(2));
+  cn.add(ctc_add,{q[2],v_obs_t2[i][1],w1});
+  cn.add(ctc_polX,{q[0],v_obs_t2[i][0],w1,p1[0],p1[1]});
+  cn.add(ctc_polY,{q[1],v_obs_t2[i][0],w1,p1[0],p1[1]});
+  cn.add(ctc_D,{p1[0],q[0],q[1],v_obs_t2[i][0],w1});
+  cn.add(ctc_D2,{v_obs_t2[i][0],q[0],q[1],p1[0],p1[1]});
+  cn.add(ctc_A,{p1[1],q[0],q[1],v_obs_t2[i][0],w1});
+  cn.add(ctc_A2,{p1[1],q[0],q[1],p1[0],w1});
+  cn.add(ctc_asso1,{p1});
+  /* ctc_polar(cartesian way) */
+  cn.add(ctc_polar,{c1[0],c1[1],v_obs_t2[i][0],w1});
+  cn.add(ctc_polar,{c2[0],c2[1],p1[0],p1[1]});
+  cn.add(ctc_add,{q[0],c1[0],c2[0]});
+  cn.add(ctc_add,{q[1],c1[1],c2[1]});
+
+ /*  cn.contract(); */
+
+  /* IntervalVector& p2 = cn.create_dom(IntervalVector(2));
+  Interval& w2 = cn.create_dom(Interval());
+  cn.add(ctc_TX,{ mq[0],q[0], q[1],q[2]});
+  cn.add(ctc_TY,{ mq[1],q[0], q[1],q[2]});
+  cn.add(ctc_TT,{ mq[2],q[2]});
+
+  cn.add(ctc_add,{mq[2],v_obs_t1[i][1],w2});
+  cn.add(ctc_polX,{mq[0],v_obs_t1[i][0],w2,p2[0],p2[1]});
+  cn.add(ctc_polY,{mq[1],v_obs_t1[i][0],w2,p2[0],p2[1]});
+  cn.add(ctc_D,{p2[0],mq[0],mq[1],v_obs_t1[i][0],w2});
+  cn.add(ctc_A,{p2[1],mq[0],mq[1],v_obs_t1[i][0],w2});
+  cn.add(ctc_asso2,{p2});
+   */
+
+
+ /*  obs2_polar[i]=IntervalVector(2);
+  obs2_polar[i][0]=p1[0];
+  obs2_polar[i][1]=p1[1]; */
+
+  
+}
+cn.contract();
+cout<<q<<endl;
+cout<<qtrue<<endl;
+
+/* =========================================================================SIVIA_Polar========================================================================= */
+
+
+SIVIA_Polar(v_obs_t2,v_obs_t1,q,6);
+
+
+    /* ===================================================================== GRAPHICS ===================================================================== */
 
     vibes::beginDrawing();
 
@@ -441,39 +736,46 @@ cout<<qvar<<endl;
     fig_map2.set_properties(10, 10, 600, 600);
     //observation t1
     
-    for(auto& obs : b_obs_t1){
+    /* for(auto& obs : b_obs_t1){
            fig_map2.draw_box(obs, "red");} 
-
+ */
 
     //hull
-    for(auto& obs : asso_hull){
+   /*  for(auto& obs : asso_hull){
            fig_map2.draw_box(obs, "red");} 
-
+ */
     //observation t2
     
     for(auto& obs : b_obs_t2){
            fig_map2.draw_box(obs, "green");} 
 
     //Included
-    for(auto& obs : box_included_into_hull){
-           fig_map2.draw_box(obs, "black");} 
+    /* for(auto& obs : box_included_into_hull){
+           fig_map2.draw_box(obs, "black");}  */
 
-    fig_map2.axis_limits(map_area);
+   /*  fig_map2.axis_limits(map_area); */
     fig_map2.show();
 
   //Map3 
     VIBesFigMap fig_map3("Map3");
     fig_map3.set_properties(10, 10, 600, 600);
+    for(const auto& iv : v_b1){
+        fig_map3.add_beacon(Beacon(iv), 0.2);}
+    for(const auto& iv : v_b2){
+        fig_map3.add_beacon(Beacon(iv), 0.2);}
+      
     //observation t1
-    
-    for(auto& obs : b_obs_t1){
-           fig_map3.draw_box(obs, "red");} 
+    fig_map3.add_observations(v_obs_t2, truth2);
+    /* fig_map3.add_observations(obs2_polar, truth1); */
 
     //observation t2
+    /* fig_map3.add_observations(v_obs_t2, truth2); */
     
-    for(auto& obs : b_q_opt_t2){
-           fig_map3.draw_box(obs, "green");} 
-
+     for(int i = 0 ; i < obs_t1.size() ; i++){
+            fig_map3.add_beacon(obs_t1[i], 0.2, "##A50108[#A50108]");}
+            
+     for(int i = 0 ; i < obs_t2.size() ; i++){
+        fig_map3.add_beacon(obs_t2[i], 0.2, "#00A53B[#00A53B]");}
     fig_map3.axis_limits(map_area);
     fig_map3.show();
 
